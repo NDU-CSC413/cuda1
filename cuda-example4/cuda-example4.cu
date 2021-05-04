@@ -1,25 +1,16 @@
 #include <iostream>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-
-__global__ void mmult(float* a, float* b, float* ab, size_t width)
-{
-    // calculate the row & column index of the element
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    float result = 0;
-
-    // do dot product between row of a and column of b
-    for (int k = 0; k < width; ++k)
-    {
-        result += a[row * width + k] * b[k * width + col];
-    }
-
-    // write out this thread's result
-    ab[row * width + col] = result;
-}
-__global__ void kernel2(float* da, float* db, float* dc, int width) {
+/**
+ *  mat_mult()->__global__ void
+ * Matrix multiplication without using shared memory
+ * @param da
+ * @param db
+ * @param dc
+ * @param width
+ * @return 
+ */
+__global__ void mat_mult(float* da, float* db, float* dc, int width) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -31,32 +22,25 @@ __global__ void kernel2(float* da, float* db, float* dc, int width) {
     dc[row * width + col] = result;
 }
 
-void callKernel(float* da, float* db, float* dc, int width, dim3 block_size) {
-    dim3 blocksPerGrid(width / block_size.x, width / block_size.y);
+void time_kernel(float* da, float* db, float* dc, int width,
+                         dim3 blocks_per_grid,dim3 threads_per_block) {
     cudaEvent_t kernel_start, kernel_end;
     cudaEventCreate(&kernel_start);
     cudaEventCreate(&kernel_end);
-    kernel2 << <blocksPerGrid, block_size >> > (da, db, dc, width);
+    /* warmup call*/
+    mat_mult <<<blocks_per_grid, threads_per_block >> > (da, db, dc, width);
     float time = 0;
     float total = 0;
+   
     for (int i = 0; i < 100; ++i) {
         cudaEventRecord(kernel_start);
-        mmult<< <blocksPerGrid, block_size >> > (da, db, dc, width);
+        mat_mult << <blocks_per_grid, threads_per_block>> > (da, db, dc, width);
         cudaEventRecord(kernel_end);
         cudaEventSynchronize(kernel_end);
         cudaEventElapsedTime(&time, kernel_start, kernel_end);
         total += time;
     }
-    std::cout << "time " << total/100 << '\n';
-    total = 0.;
-    for (int i = 0; i < 100; ++i) {
-        cudaEventRecord(kernel_start);
-        kernel2 << <blocksPerGrid, block_size >> > (da, db, dc, width);
-        cudaEventRecord(kernel_end);
-        cudaEventSynchronize(kernel_end);
-        cudaEventElapsedTime(&time, kernel_start, kernel_end);
-        total += time;
-    }
+    /* average time in milliseconds */
     std::cout << "time " << total / 100 << '\n';
 
 }
@@ -80,11 +64,11 @@ int main() {
     cudaMemcpy(da, a, msize * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(db, b, msize * sizeof(float), cudaMemcpyHostToDevice);
 
-    /*dim3 threadsPerBlock (matrix_w,matrix_w);
-    kernel1<<<1,threadsPerBlock>>>(da,db,dc,matrix_w);*/
+    
     /* total number of threads per block is 1024 which is the maximum */
-    dim3 threadsPerBlock(16, 16);
-    callKernel(da, db, dc, matrix_w, threadsPerBlock);
+    dim3 threads_per_block(32, 32);
+    dim3 blocks_per_grid(matrix_w / threads_per_block.x, matrix_w/ threads_per_block.y);
+    time_kernel(da, db, dc, matrix_w, blocks_per_grid,threads_per_block);
     cudaMemcpy(c, dc, msize * sizeof(float), cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < msize; ++i)

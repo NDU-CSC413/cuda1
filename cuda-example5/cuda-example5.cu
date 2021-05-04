@@ -1,9 +1,11 @@
-
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <iostream>
-
-
+#include <algorithm>
+/**
+ * Matrix multiplication using shared memory.
+ * The matrix is assumed to be square.
+ */
 
 #define BLOCK_SIZE 32
 __global__ void mult(float* da, float* db, float* dc, int width) {
@@ -73,8 +75,8 @@ int main() {
 	}
 	std::cout << "average time " << total/500 << '\n';
 	cudaMemcpy(c, dc, size * sizeof(float), cudaMemcpyDeviceToHost);
-	for (int i = 0; i < 64; i++)
-		std::cout << c[i] << ' ';
+	/*for (int i = 0; i < 64; i++)
+		std::cout << c[i] << ' ';*/
 	std::cout << std::endl;
 	cudaFree(da);
 	cudaFree(db);
