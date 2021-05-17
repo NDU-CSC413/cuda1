@@ -2,11 +2,20 @@
 #include <device_launch_parameters.h>
 #include <iostream>
 #include <algorithm>
+#include <chrono>
 /**
  * Matrix multiplication using shared memory.
  * The matrix is assumed to be square.
  */
+using Duration = std::chrono::duration<double, std::milli>;
 
+#define TIMEIT(dur,...)\
+   {\
+    auto start = std::chrono::high_resolution_clock::now();\
+    __VA_ARGS__\
+    auto end = std::chrono::high_resolution_clock::now();\
+     dur = std::chrono::duration<double, std::milli>(end - start);\
+}
 #define BLOCK_SIZE 32
 __global__ void mult(float* da, float* db, float* dc, int width) {
 
@@ -61,26 +70,42 @@ int main() {
 	cudaMemcpy(db, b, size * sizeof(float), cudaMemcpyHostToDevice);
 	dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
 	dim3 gridSize(matrix_width/ BLOCK_SIZE, matrix_width / BLOCK_SIZE);
-	mult << <gridSize, blockSize >> > (da, db, dc, matrix_width);
+	mult <<<gridSize, blockSize >> > (da, db, dc, matrix_width);
 	float time = 0;
-	float total = 0;
-
-	for (int i = 0; i < 500; ++i) {
+	float gpu_time = 0;
+	const int num_trials = 500;
+	for (int i = 0; i < num_trials; ++i) {
 		cudaEventRecord(kernel_start,0);
 		mult << <gridSize, blockSize >> > (da, db, dc, matrix_width);
 		cudaEventRecord(kernel_end,0);
 		cudaEventSynchronize(kernel_end);
 		cudaEventElapsedTime(&time, kernel_start, kernel_end);
-		total += time;
+		gpu_time += time;
 	}
-	std::cout << "average time " << total/500 << '\n';
+	gpu_time /= num_trials;
+	std::cout << "GPU  time " << gpu_time << '\n';
 	cudaMemcpy(c, dc, size * sizeof(float), cudaMemcpyDeviceToHost);
-	/*for (int i = 0; i < 64; i++)
-		std::cout << c[i] << ' ';*/
-	std::cout << std::endl;
+	for (int i = 0; i < size; i++) {
+		if (c[i] != matrix_width) {
+			std::cout << "error\n";
+			break;
+		}
+		else c[i] = 0;
+	}
 	cudaFree(da);
 	cudaFree(db);
 	cudaFree(dc);
+	Duration d;
+	TIMEIT(d,
+		for (int i = 0; i < matrix_width; ++i) {
+			for (int j = 0; j < matrix_width; ++j)
+				for (int k = 0; k < matrix_width; ++k)
+					c[i * matrix_width + j] += a[i * matrix_width+ k] * b[matrix_width * k + j];
+		}
+	)
+		
+	std::cout << "CPU time " << d.count() << " milliseconds \n";
+	std::cout << "gain = " << d.count() / gpu_time << "\n";
 	free(a);
 	free(b);
 	free(c);
